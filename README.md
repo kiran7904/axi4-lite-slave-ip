@@ -61,7 +61,3 @@ To clean generated files:
 ```bash
 make clean
 ```
-
-## Resume Context
-
-This repository was separated from a larger practice collection and turned into a standalone project so it can be reviewed independently as an RTL design sample.
