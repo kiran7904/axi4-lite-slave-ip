@@ -1,5 +1,16 @@
 `timescale 1ns / 1ps
 
+// -----------------------------------------------------------------------------
+// AXI4-Lite Slave Interface
+// -----------------------------------------------------------------------------
+// A compact register-mapped AXI4-Lite slave with:
+// - 4 internal word registers
+// - byte-enable writes using WSTRB
+// - simple OKAY / SLVERR response generation
+//
+// This module is intentionally small and readable as a portfolio RTL sample.
+// -----------------------------------------------------------------------------
+
 module axi_slave_protocol #(
     parameter addr_width = 4,
     parameter data_width = 32
@@ -30,11 +41,19 @@ module axi_slave_protocol #(
     output logic [1:0] rresp
 );
 
-    logic [data_width-1:0] regfile [0:3];
+    localparam int REG_COUNT = 4;
+    localparam logic [1:0] AXI_RESP_OKAY   = 2'b00;
+    localparam logic [1:0] AXI_RESP_SLVERR = 2'b10;
+
+    logic [data_width-1:0] regfile [0:REG_COUNT-1];
 
     logic aw_hs, w_hs, ar_hs;
     logic aw_pending, w_pending;
     logic [addr_width-1:0] awaddr_q;
+    logic [addr_width-1:0] write_index_s;
+    logic [addr_width-1:0] read_index_s;
+    logic                  write_addr_valid_s;
+    logic                  read_addr_valid_s;
 
     assign awready = !aw_pending;
     assign wready  = !w_pending;
@@ -43,6 +62,11 @@ module axi_slave_protocol #(
     assign aw_hs = awvalid && awready;
     assign w_hs  = wvalid  && wready;
     assign ar_hs = arvalid && arready;
+
+    assign write_index_s      = awaddr_q[3:2];
+    assign read_index_s       = araddr[3:2];
+    assign write_addr_valid_s = (write_index_s < REG_COUNT);
+    assign read_addr_valid_s  = (read_index_s < REG_COUNT);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -54,7 +78,7 @@ module axi_slave_protocol #(
             rresp      <= 0;
             rdata      <= 0;
             awaddr_q   <= 0;
-            for (int i = 0; i < 4; i++) regfile[i] <= 0;
+            for (int i = 0; i < REG_COUNT; i++) regfile[i] <= 0;
         end else begin
             if (aw_hs) begin
                 awaddr_q   <= awaddr;
@@ -66,13 +90,13 @@ module axi_slave_protocol #(
             end
 
             if (aw_pending && w_pending && !bvalid) begin
-                if (awaddr_q[3:2] < 4) begin
+                if (write_addr_valid_s) begin
                     for (int i = 0; i < data_width/8; i++)
                         if (wstrb[i])
-                            regfile[awaddr_q[3:2]][8*i +: 8] <= wdata[8*i +: 8];
-                    bresp <= 2'b00;
+                            regfile[write_index_s][8*i +: 8] <= wdata[8*i +: 8];
+                    bresp <= AXI_RESP_OKAY;
                 end else begin
-                    bresp <= 2'b10;
+                    bresp <= AXI_RESP_SLVERR;
                 end
                 bvalid     <= 1;
                 aw_pending <= 0;
@@ -83,12 +107,12 @@ module axi_slave_protocol #(
                 bvalid <= 0;
 
             if (ar_hs) begin
-                if (araddr[3:2] < 4) begin
-                    rdata <= regfile[araddr[3:2]];
-                    rresp <= 2'b00;
+                if (read_addr_valid_s) begin
+                    rdata <= regfile[read_index_s];
+                    rresp <= AXI_RESP_OKAY;
                 end else begin
                     rdata <= 0;
-                    rresp <= 2'b10;
+                    rresp <= AXI_RESP_SLVERR;
                 end
                 rvalid <= 1;
             end
